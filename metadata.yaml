@@ -1,5 +1,9 @@
 name: astrbot_plugin_qq_face_to_text
 desc: 让LLM读懂QQ表情
 help: 自动在 LLM 请求前拦截，将 [表情:111] 替换为 [表情:可怜] 等文字
-version: v1.0.0
+version: v1.0.1
 author: Slime
+support_platforms:
+  - aiocqhttp
+  - qq_official
+category: AI 增强
