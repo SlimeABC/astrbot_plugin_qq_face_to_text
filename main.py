@@ -3,7 +3,7 @@ from astrbot.api import logger
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, register
-from astrbot.core.message.components import Face, Plain
+from astrbot.core.message.components import At, AtAll, Face, Plain
 
 FACE_MAP = {
     0: "惊讶",
@@ -291,6 +291,8 @@ FACE_MAP = {
     419: "火车",
     420: "中火车",
     421: "大火车",
+    422: "粽于等到你",
+    423: "复兴号",
     424: "续标识",
     425: "求放过",
     426: "玩火",
@@ -299,6 +301,40 @@ FACE_MAP = {
     429: "蛇年快乐",
     430: "蛇身",
     431: "蛇尾",
+    432: "灵蛇献瑞",
+    450: "撇嘴",
+    451: "色",
+    452: "微笑",
+    453: "发呆",
+    454: "得意",
+    455: "害羞",
+    456: "闭嘴",
+    457: "睡",
+    458: "我吗",
+    459: "优雅",
+    460: "硬撑",
+    461: "宕机",
+    462: "无语",
+    463: "新年快乐",
+    464: "马上到",
+    465: "拆红包",
+    466: "羞羞哒",
+    467: "摇花手",
+    468: "失眠",
+    469: "坚毅",
+    470: "马到成功",
+    472: "心动",
+    474: "给你一拳",
+    475: "干饭",
+    476: "不是吧",
+    477: "你懂的",
+    478: "对的对的",
+    479: "不对不对",
+    480: "散味儿",
+    481: "学习",
+    482: "热化了",
+    483: "略",
+    484: "比爱心",
 }
 
 @register("astrbot_plugin_qq_face_to_text", "user", "QQ表情转文字", "1.0.0")
@@ -309,16 +345,21 @@ class QQFacePlugin(Star):
         logger.info("QQ表情插件已加载，映射 %d 个表情", len(FACE_MAP))
         logger.info("=" * 40)
 
-    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE, priority=20000)
     async def on_group(self, event: AstrMessageEvent):
         await self._process(event)
 
-    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE, priority=20000)
     async def on_private(self, event: AstrMessageEvent):
         await self._process(event)
 
     async def _process(self, event: AstrMessageEvent):
-        """核心：遍历消息链，把 Face 组件换成 Plain 文字"""
+        """核心：遍历消息链，把 Face 组件换成 [表情:名称] 文字。
+
+        必须早于消息防抖动插件（priority=50）执行：防抖只读组件的
+        .text/.content，Face 没有文本会被它直接丢弃；而且防抖处理完会
+        停止事件传播，跑在它后面的本插件根本没有机会介入。
+        """
         chain = event.get_messages()
         if not chain:
             return
@@ -330,7 +371,12 @@ class QQFacePlugin(Star):
             if isinstance(seg, Face):
                 face_id = seg.id
                 name = FACE_MAP.get(face_id, f"未知表情{face_id}")
-                new_chain.append(Plain(f"[表情:{name}]"))
+                marker = f"[表情:{name}]"
+                # 并进相邻文字，避免表情在 prompt 里单独占一行
+                if new_chain and isinstance(new_chain[-1], Plain):
+                    new_chain[-1] = Plain(text=new_chain[-1].text + marker)
+                else:
+                    new_chain.append(Plain(text=marker))
                 changed = True
                 logger.info("替换 Face(id=%s) -> [表情:%s]", face_id, name)
             else:
@@ -339,9 +385,33 @@ class QQFacePlugin(Star):
         if changed:
             # 关键：替换消息链，这样 AstrBot 后续构建 prompt 时用的是文字
             event.message_obj.message = new_chain
-            # 同步更新 message_str（用于日志显示等）
-            event.message_str = "".join(str(c) for c in new_chain)
-            logger.info("消息链已替换为: %s", event.message_str)
+            # 同步 message_str：prompt 直接取自这里，必须给纯文本，不能用 str(组件)
+            text = self._to_text(new_chain)
+            event.message_str = text
+            try:
+                event.message_obj.message_str = text
+            except Exception:
+                pass
+            logger.info("消息链已替换为: %s", text)
+
+    @staticmethod
+    def _to_text(chain) -> str:
+        """按纯文本重建消息字符串，供 prompt 使用。
+
+        只拼接有文本语义的组件；@ 提及重建为文本，图片、引用等本来
+        就不在 message_str 里，保持不额外增加内容。
+        """
+        parts = []
+        for seg in chain:
+            if isinstance(seg, Plain):
+                parts.append(seg.text)
+            elif isinstance(seg, AtAll):
+                parts.append(" @全体成员 ")
+            elif isinstance(seg, At):
+                parts.append(
+                    f" @{seg.name}({seg.qq}) " if seg.name else f" @{seg.qq} "
+                )
+        return "".join(parts)
 
     @filter.on_llm_request()
     async def on_llm(self, event: AstrMessageEvent, req: ProviderRequest):
