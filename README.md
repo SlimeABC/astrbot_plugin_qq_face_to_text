@@ -20,7 +20,7 @@ https://github.com/SlimeABC/astrbot_plugin_qq_face_to_text
 
 ## 使用
 
-装完自动生效，无需配置。内置 293 个表情映射，覆盖常见黄脸和超级表情。
+装完自动生效，无需配置。内置 329 个表情映射，覆盖常见黄脸和超级表情。
 
 ## 排障
 
